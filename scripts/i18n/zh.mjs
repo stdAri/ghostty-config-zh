@@ -101,11 +101,16 @@ function looksLikeText(str) {
     return str.length > 1 && letters !== null && letters.length >= 2 && !/&[a-z]+;/.test(str) && !str.endsWith("(") && !str.includes("=>");
 }
 
+// Svelte block-end markers after which template text can appear.
+// Arbitrary "}" is NOT a safe boundary (interpolations appear inside tags).
+const BLOCK_END = String.raw`\{(?:/[a-z]+|:(?:else|then|catch)[^}]*)\}`;
+
 function extractSvelte(content) {
     const {rest} = splitTemplate(content);
     const found = new Set();
-    for (const match of rest.matchAll(/(?<![=\->])>([^<>{}]+)(?=<|\{)/g)) {
-        const text = match[1].trim();
+    const reText = new RegExp(`(?<![=\\->])>([^<>{}]+)(?=<|\\{)|${BLOCK_END}\\s*([^<>{}]+?)(?=<|\\{)`, "g");
+    for (const match of rest.matchAll(reText)) {
+        const text = (match[1] ?? match[2]).trim();
         if (looksLikeText(text)) found.add(text);
     }
     for (const match of rest.matchAll(/\b(?:placeholder|title|aria-label)="([^"]+)"/g)) {
@@ -196,10 +201,10 @@ function applySvelte(content, entries) {
     let replaced = 0;
     for (const [en, zh] of entries) {
         const esc = escapeRegExp(en);
-        const reText = new RegExp(`(?<![=\\->])>(\\s*${esc}\\s*)(?=<|\\{)`, "g");
+        const reText = new RegExp(`(?<![=\\->])(>)\\s*${esc}\\s*(?=<|\\{)|(${BLOCK_END})\\s*${esc}\\s*(?=<|\\{)`, "g");
         const reAttr = new RegExp(`\\b((?:placeholder|title|aria-label)=)"${esc}"`, "g");
         if (reText.test(out) || reAttr.test(out)) {
-            out = out.replace(reText, () => ">" + zh).replace(reAttr, (_, attr) => `${attr}"${zh}"`);
+            out = out.replace(reText, (_, tag, block) => (tag ?? block) + zh).replace(reAttr, (_, attr) => `${attr}"${zh}"`);
             replaced++;
         }
     }
