@@ -1,0 +1,43 @@
+name: Sync upstream and translate
+
+# Merges zerebos/ghostty-config into main twice a week, extracts any new
+# English strings, machine-translates them into i18n/zh-CN.json, and pushes.
+# The push then triggers the "Deploy to GitHub Pages" workflow.
+
+on:
+    schedule:
+        - cron: "23 2 * * 1,4" # Monday & Thursday 02:23 UTC
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+jobs:
+    sync:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Merge upstream
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git remote add upstream https://github.com/zerebos/ghostty-config.git
+                  git fetch upstream main
+                  git merge upstream/main --no-edit
+
+            - name: Extract and translate new strings
+              run: |
+                  node scripts/i18n/zh.mjs extract
+                  node scripts/i18n/zh.mjs translate
+
+            - name: Commit dictionary changes
+              run: |
+                  git add i18n/
+                  git diff --cached --quiet || git commit -m "chore(i18n): update zh-CN dictionary"
+
+            - name: Push
+              run: git push origin main
