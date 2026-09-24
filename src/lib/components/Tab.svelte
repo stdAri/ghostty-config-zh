@@ -1,4 +1,5 @@
 <script lang="ts">
+    import {base} from "$app/paths";
     import {page} from "$app/state";
     import type {Snippet} from "svelte";
 
@@ -16,14 +17,15 @@
     const isExternal = $derived(route.startsWith("http"));
     const target = $derived(isExternal ? "_blank" : "");
     const rel = $derived(isExternal ? "noopener noreferrer" : "");
+    const href = $derived(isExternal ? route : `${base}${route}`);
 
-    const isSelected = $derived(selected ?? (path === route));
+    const isSelected = $derived(selected ?? (path === href));
 </script>
 
 
 <!-- Why is eslint like this? -->
 <!-- eslint-disable-next-line svelte/no-navigation-without-resolve, svelte/first-attribute-linebreak -->
-<a href={route}
+<a href={href}
     class="nav-tab"
     class:selected={isSelected}
     {target}
