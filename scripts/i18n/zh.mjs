@@ -7,7 +7,7 @@
 //   node scripts/i18n/zh.mjs apply      # rewrite sources in the working tree (build-time only)
 //   node scripts/i18n/zh.mjs status     # report translation coverage
 
-import {existsSync, readFileSync, writeFileSync} from "node:fs";
+import {existsSync, readdirSync, readFileSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -21,6 +21,15 @@ const TARGETS = [
     {file: "src/lib/settings/registry.ts", fields: ["name", "description", "note"]},
     {file: "src/lib/settings/navigation.ts", fields: ["name"]}
 ];
+
+// Directories whose .svelte files are scanned for template text nodes and
+// placeholder/title/aria-label attributes. <script> and <style> blocks are
+// never touched, so code logic (e.g. `platform === "macOS"`) is unaffected.
+const SVELTE_DIRS = ["src/routes", "src/lib/components", "src/lib/views"];
+
+// Excluded from scanning: preview components whose template text is demo
+// content (lorem ipsum, fake shell output) plus dev-only showcase pages.
+const SVELTE_EXCLUDE = [/views\/.*Preview.*\.svelte$/, /component-showcase/, /dropdown-debug/];
 
 // Non-string-literal patches applied to the working tree before building.
 const PATCHES = [
@@ -62,12 +71,65 @@ function extractFrom(content, fields) {
     return found;
 }
 
+function svelteFiles() {
+    const files = [];
+    for (const dir of SVELTE_DIRS) {
+        for (const entry of readdirSync(join(root, dir), {recursive: true})) {
+            const file = join(dir, String(entry));
+            if (file.endsWith(".svelte") && !SVELTE_EXCLUDE.some((re) => re.test(file))) files.push(file);
+        }
+    }
+    return files;
+}
+
+// Svelte templates: keep code blocks out of scope by swapping them for tokens.
+function splitTemplate(content) {
+    const blocks = [];
+    const rest = content.replace(/<(script|style)[\s\S]*?<\/\1>/g, (block) => {
+        blocks.push(block);
+        return `\x01BLOCK${blocks.length - 1}\x01`;
+    });
+    return {rest, blocks};
+}
+
+function joinTemplate(rest, blocks) {
+    return rest.replace(/\x01BLOCK(\d+)\x01/g, (_, i) => blocks[Number(i)]);
+}
+
+function looksLikeText(str) {
+    const letters = str.match(/[a-zA-Z]/g);
+    return str.length > 1 && letters !== null && letters.length >= 2 && !/&[a-z]+;/.test(str);
+}
+
+function extractSvelte(content) {
+    const {rest} = splitTemplate(content);
+    const found = new Set();
+    for (const match of rest.matchAll(/>([^<>{}]+)</g)) {
+        const text = match[1].trim();
+        if (looksLikeText(text)) found.add(text);
+    }
+    for (const match of rest.matchAll(/\b(?:placeholder|title|aria-label)="([^"]+)"/g)) {
+        const text = match[1].trim();
+        if (looksLikeText(text)) found.add(text);
+    }
+    return found;
+}
+
 function cmdExtract() {
     const dict = loadDict();
     let added = 0;
     for (const target of TARGETS) {
         const content = readFileSync(join(root, target.file), "utf8");
         for (const str of extractFrom(content, target.fields)) {
+            if (!(str in dict)) {
+                dict[str] = "";
+                added++;
+            }
+        }
+    }
+    for (const file of svelteFiles()) {
+        const content = readFileSync(join(root, file), "utf8");
+        for (const str of extractSvelte(content)) {
             if (!(str in dict)) {
                 dict[str] = "";
                 added++;
@@ -124,9 +186,31 @@ async function cmdTranslate(limit) {
     console.log(`translate: ${translated} translated, ${failed} failed, ${pending.length - batch.length + failed} still pending`);
 }
 
+function escapeRegExp(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function applySvelte(content, entries) {
+    const {rest, blocks} = splitTemplate(content);
+    let out = rest;
+    let replaced = 0;
+    for (const [en, zh] of entries) {
+        const esc = escapeRegExp(en);
+        const reText = new RegExp(`(>)\\s*${esc}\\s*(?=<)`, "g");
+        const reAttr = new RegExp(`\\b((?:placeholder|title|aria-label)=)"${esc}"`, "g");
+        if (reText.test(out) || reAttr.test(out)) {
+            out = out.replace(reText, (_, gt) => gt + zh).replace(reAttr, (_, attr) => `${attr}"${zh}"`);
+            replaced++;
+        }
+    }
+    return {content: joinTemplate(out, blocks), replaced};
+}
+
 function cmdApply() {
     const dict = loadDict();
-    const entries = Object.entries(dict).filter(([, zh]) => zh);
+    // Longest first so overlapping strings (e.g. "Search" vs "Search settings")
+    // never partially shadow each other.
+    const entries = Object.entries(dict).filter(([, zh]) => zh).sort(([a], [b]) => b.length - a.length);
     const missing = Object.entries(dict).filter(([, zh]) => !zh);
     for (const target of TARGETS) {
         const path = join(root, target.file);
@@ -143,6 +227,19 @@ function cmdApply() {
         writeFileSync(path, content);
         console.log(`apply: ${target.file} — ${replaced} strings translated`);
     }
+    let svelteReplaced = 0;
+    let svelteFilesTouched = 0;
+    for (const file of svelteFiles()) {
+        const path = join(root, file);
+        const content = readFileSync(path, "utf8");
+        const result = applySvelte(content, entries);
+        if (result.replaced > 0) {
+            writeFileSync(path, result.content);
+            svelteReplaced += result.replaced;
+            svelteFilesTouched++;
+        }
+    }
+    console.log(`apply: ${svelteFilesTouched} .svelte files — ${svelteReplaced} strings translated`);
     for (const patch of PATCHES) {
         const path = join(root, patch.file);
         let content = readFileSync(path, "utf8");
