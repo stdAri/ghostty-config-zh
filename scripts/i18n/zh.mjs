@@ -27,7 +27,7 @@ const PATCHES = [
     {
         file: "svelte.config.js",
         find: 'base: ""',
-        replace: 'base: process.env.BASE_PATH ?? "",\n            relative: false'
+        replace: 'base: process.env.BASE_PATH ?? ""'
     }
 ];
 
