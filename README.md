@@ -2,6 +2,7 @@
   <a href="https://ghostty.zerebos.com"><img src="./src/lib/images/icon.webp" height="128" alt="Ghostty Config"></a>
   <h1 align="center" style="border:0;">Ghostty Config</h1>
   <p align="center">A beautiful intuitive configuration generator for <a href="https://ghostty.org/" target="_blank">Ghostty</a> terminal.</p>
+  <p align="center"><b>English</b> | <a href="./README_ZH.md">简体中文</a></p>
 
 [![GitHub Stars](https://www.shieldcn.dev/github/stars/zerebos/ghostty-config.svg?variant=secondary&size=sm)](https://github.com/zerebos/ghostty-config/stargazers)
 [![Build](https://www.shieldcn.dev/github/ci/zerebos/ghostty-config.svg?variant=secondary&size=sm)](https://github.com/zerebos/ghostty-config/actions)
